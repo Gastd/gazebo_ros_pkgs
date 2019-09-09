@@ -487,8 +487,8 @@ namespace gazebo {
     boost::mutex::scoped_lock scoped_lock(lock);
 
     // Motion model velocity from Probabilistc Robotics Book, Thrun et al.
-    double vr = x_ + sample(alpha_[0]*fabs(x_) + alpha_[1]*fabs(rot_));
-    double va = rot_ + sample(alpha_[2]*fabs(x_) + alpha_[3]*fabs(rot_));
+    double vr = x_ + sample(alpha_[0]*x_*x_ + alpha_[1]*rot_*rot_);
+    double va = rot_ + sample(alpha_[2]*x_*x_ + alpha_[3]*rot_*rot_);
 
     wheel_speed_[RIGHT_FRONT] = vr + va * wheel_separation_ / 2.0;
     wheel_speed_[RIGHT_REAR] = vr + va * wheel_separation_ / 2.0;

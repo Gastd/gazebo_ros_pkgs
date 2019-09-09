@@ -226,6 +226,46 @@ namespace gazebo {
       covariance_yaw_ = _sdf->GetElement("covariance_yaw")->Get<double>();
     }
 
+    this->wheel_accel_ = 0.0;
+    if (!_sdf->HasElement("wheel_accel")) {
+      ROS_WARN_NAMED("skid_steer_drive", "GazeboRosSkidDrive Plugin (ns = %s) missing <wheel_accel>, defaults to %f",
+          this->robot_namespace_.c_str(), wheel_accel_);
+    } else {
+      wheel_accel_ = _sdf->GetElement("wheel_accel")->Get<double>();
+    }
+
+    this->alpha_[0] = 0.01;
+    if (!_sdf->HasElement("alpha1")) {
+      ROS_WARN_NAMED("skid_steer_drive", "GazeboRosSkidSteerDrive Plugin (ns = %s) missing <alpha1>, defaults to %f",
+          this->robot_namespace_.c_str(), alpha_[0]);
+    } else {
+      alpha_[0] = _sdf->GetElement("alpha1")->Get<double>();
+    }
+
+    this->alpha_[1] = 0.01;
+    if (!_sdf->HasElement("alpha2")) {
+      ROS_WARN_NAMED("skid_steer_drive", "GazeboRosSkidSteerDrive Plugin (ns = %s) missing <alpha2>, defaults to %f",
+          this->robot_namespace_.c_str(), alpha_[1]);
+    } else {
+      alpha_[1] = _sdf->GetElement("alpha2")->Get<double>();
+    }
+
+    this->alpha_[2] = 0.01;
+    if (!_sdf->HasElement("alpha3")) {
+      ROS_WARN_NAMED("skid_steer_drive", "GazeboRosSkidSteerDrive Plugin (ns = %s) missing <alpha3>, defaults to %f",
+          this->robot_namespace_.c_str(), alpha_[2]);
+    } else {
+      alpha_[2] = _sdf->GetElement("alpha3")->Get<double>();
+    }
+
+    this->alpha_[3] = 0.01;
+    if (!_sdf->HasElement("alpha4")) {
+      ROS_WARN_NAMED("skid_steer_drive", "GazeboRosSkidSteerDrive Plugin (ns = %s) missing <alpha4>, defaults to %f",
+          this->robot_namespace_.c_str(), alpha_[3]);
+    } else {
+      alpha_[3] = _sdf->GetElement("alpha4")->Get<double>();
+    }
+    
     // Initialize update rate stuff
     if (this->update_rate_ > 0.0) {
       this->update_period_ = 1.0 / this->update_rate_;
@@ -242,7 +282,12 @@ namespace gazebo {
     wheel_speed_[RIGHT_FRONT] = 0;
     wheel_speed_[LEFT_FRONT] = 0;
     wheel_speed_[RIGHT_REAR] = 0;
-	wheel_speed_[LEFT_REAR] = 0;
+    wheel_speed_[LEFT_REAR] = 0;
+
+    wheel_speed_instr_[RIGHT_FRONT] = 0;
+    wheel_speed_instr_[LEFT_FRONT] = 0;
+    wheel_speed_instr_[RIGHT_REAR] = 0;
+    wheel_speed_instr_[LEFT_REAR] = 0;
 
     x_ = 0;
     rot_ = 0;
@@ -335,6 +380,14 @@ namespace gazebo {
 
   // Update the controller
   void GazeboRosSkidSteerDrive::UpdateChild() {
+      // ROS_WARN_NAMED("skid_steer_drive", "UpdateChild");
+
+    for ( int i = 0; i < 4; i++ ) {
+      if ( fabs(torque - joints[i]->GetParam ( "fmax", 0 )) > 1e-6 ) {
+        joints[i]->SetParam ( "fmax", 0, torque );
+      }
+    }
+
 #if GAZEBO_MAJOR_VERSION >= 8
     common::Time current_time = this->world->SimTime();
 #else
@@ -345,20 +398,68 @@ namespace gazebo {
     if (seconds_since_last_update > update_period_) {
 
       publishOdometry(seconds_since_last_update);
+      // ROS_WARN_NAMED("skid_steer_drive", "Odometry");
 
       // Update robot in case new velocities have been requested
       getWheelVelocities();
-#if GAZEBO_MAJOR_VERSION > 2
-      joints[LEFT_FRONT]->SetParam("vel", 0, wheel_speed_[LEFT_FRONT] / (wheel_diameter_ / 2.0));
-      joints[RIGHT_FRONT]->SetParam("vel", 0, wheel_speed_[RIGHT_FRONT] / (wheel_diameter_ / 2.0));
-      joints[LEFT_REAR]->SetParam("vel", 0, wheel_speed_[LEFT_REAR] / (wheel_diameter_ / 2.0));
-      joints[RIGHT_REAR]->SetParam("vel", 0, wheel_speed_[RIGHT_REAR] / (wheel_diameter_ / 2.0));
-#else
-      joints[LEFT_FRONT]->SetVelocity(0, wheel_speed_[LEFT_FRONT] / (wheel_diameter_ / 2.0));
-      joints[RIGHT_FRONT]->SetVelocity(0, wheel_speed_[RIGHT_FRONT] / (wheel_diameter_ / 2.0));
-      joints[LEFT_REAR]->SetVelocity(0, wheel_speed_[LEFT_REAR] / (wheel_diameter_ / 2.0));
-      joints[RIGHT_REAR]->SetVelocity(0, wheel_speed_[RIGHT_REAR] / (wheel_diameter_ / 2.0));
-#endif
+      double current_speed[4];
+
+      current_speed[LEFT_FRONT] = joints[LEFT_FRONT]->GetVelocity ( 0 )   * ( wheel_diameter_ / 2.0 );
+      current_speed[LEFT_REAR] = joints[LEFT_REAR]->GetVelocity ( 0 )   * ( wheel_diameter_ / 2.0 );
+      current_speed[RIGHT_FRONT] = joints[RIGHT_FRONT]->GetVelocity ( 0 ) * ( wheel_diameter_ / 2.0 );
+      current_speed[RIGHT_REAR] = joints[RIGHT_REAR]->GetVelocity ( 0 ) * ( wheel_diameter_ / 2.0 );
+
+      if ( wheel_accel_ == 0 ||
+                ( fabs ( wheel_speed_[LEFT_FRONT] - current_speed[LEFT_FRONT] ) < 0.01 ) ||
+                ( fabs ( wheel_speed_[LEFT_REAR] - current_speed[LEFT_REAR] ) < 0.01 ) ||
+                ( fabs ( wheel_speed_[RIGHT_FRONT] - current_speed[RIGHT_FRONT] ) < 0.01 ) ||
+                ( fabs ( wheel_speed_[RIGHT_REAR] - current_speed[RIGHT_REAR] ) < 0.01 ) ) {
+            //if max_accel == 0, or target speed is reached
+            joints[LEFT_FRONT]->SetParam ( "vel", 0, wheel_speed_[LEFT_FRONT]/ ( wheel_diameter_ / 2.0 ) );
+            joints[LEFT_REAR]->SetParam ( "vel", 0, wheel_speed_[LEFT_REAR]/ ( wheel_diameter_ / 2.0 ) );
+            joints[RIGHT_FRONT]->SetParam ( "vel", 0, wheel_speed_[RIGHT_FRONT]/ ( wheel_diameter_ / 2.0 ) );
+            joints[RIGHT_REAR]->SetParam ( "vel", 0, wheel_speed_[RIGHT_REAR]/ ( wheel_diameter_ / 2.0 ) );
+        } else {
+            if ( wheel_speed_[LEFT_FRONT]>=current_speed[LEFT_FRONT] )
+                wheel_speed_instr_[LEFT_FRONT]+=fmin ( wheel_speed_[LEFT_FRONT]-current_speed[LEFT_FRONT],  wheel_accel_ * seconds_since_last_update );
+            else
+                wheel_speed_instr_[LEFT_FRONT]+=fmax ( wheel_speed_[LEFT_FRONT]-current_speed[LEFT_FRONT], -wheel_accel_ * seconds_since_last_update );
+
+            if ( wheel_speed_[LEFT_REAR]>=current_speed[LEFT_REAR] )
+                wheel_speed_instr_[LEFT_REAR]+=fmin ( wheel_speed_[LEFT_REAR]-current_speed[LEFT_REAR],  wheel_accel_ * seconds_since_last_update );
+            else
+                wheel_speed_instr_[LEFT_REAR]+=fmax ( wheel_speed_[LEFT_REAR]-current_speed[LEFT_REAR], -wheel_accel_ * seconds_since_last_update );
+
+            if ( wheel_speed_[RIGHT_FRONT]>current_speed[RIGHT_FRONT] )
+                wheel_speed_instr_[RIGHT_FRONT]+=fmin ( wheel_speed_[RIGHT_FRONT]-current_speed[RIGHT_FRONT], wheel_accel_ * seconds_since_last_update );
+            else
+                wheel_speed_instr_[RIGHT_FRONT]+=fmax ( wheel_speed_[RIGHT_FRONT]-current_speed[RIGHT_FRONT], -wheel_accel_ * seconds_since_last_update );
+
+            if ( wheel_speed_[RIGHT_REAR]>current_speed[RIGHT_REAR] )
+                wheel_speed_instr_[RIGHT_REAR]+=fmin ( wheel_speed_[RIGHT_REAR]-current_speed[RIGHT_REAR], wheel_accel_ * seconds_since_last_update );
+            else
+                wheel_speed_instr_[RIGHT_REAR]+=fmax ( wheel_speed_[RIGHT_REAR]-current_speed[RIGHT_REAR], -wheel_accel_ * seconds_since_last_update );
+
+            // ROS_INFO_NAMED("diff_drive", "actual wheel speed = %lf, issued wheel speed= %lf", current_speed[LEFT], wheel_speed_[LEFT]);
+            // ROS_INFO_NAMED("diff_drive", "actual wheel speed = %lf, issued wheel speed= %lf", current_speed[RIGHT],wheel_speed_[RIGHT]);
+
+            joints[LEFT_FRONT]->SetParam ( "vel", 0, wheel_speed_instr_[LEFT_FRONT] / ( wheel_diameter_ / 2.0 ) );
+            joints[LEFT_REAR]->SetParam ( "vel", 0, wheel_speed_instr_[LEFT_REAR] / ( wheel_diameter_ / 2.0 ) );
+            joints[RIGHT_FRONT]->SetParam ( "vel", 0, wheel_speed_instr_[RIGHT_FRONT] / ( wheel_diameter_ / 2.0 ) );
+            joints[RIGHT_REAR]->SetParam ( "vel", 0, wheel_speed_instr_[RIGHT_REAR] / ( wheel_diameter_ / 2.0 ) );
+        }
+
+// #if GAZEBO_MAJOR_VERSION > 2
+//       joints[LEFT_FRONT]->SetParam("vel", 0, wheel_speed_[LEFT_FRONT] / (wheel_diameter_ / 2.0));
+//       joints[RIGHT_FRONT]->SetParam("vel", 0, wheel_speed_[RIGHT_FRONT] / (wheel_diameter_ / 2.0));
+//       joints[LEFT_REAR]->SetParam("vel", 0, wheel_speed_[LEFT_REAR] / (wheel_diameter_ / 2.0));
+//       joints[RIGHT_REAR]->SetParam("vel", 0, wheel_speed_[RIGHT_REAR] / (wheel_diameter_ / 2.0));
+// #else
+//       joints[LEFT_FRONT]->SetVelocity(0, wheel_speed_[LEFT_FRONT] / (wheel_diameter_ / 2.0));
+//       joints[RIGHT_FRONT]->SetVelocity(0, wheel_speed_[RIGHT_FRONT] / (wheel_diameter_ / 2.0));
+//       joints[LEFT_REAR]->SetVelocity(0, wheel_speed_[LEFT_REAR] / (wheel_diameter_ / 2.0));
+//       joints[RIGHT_REAR]->SetVelocity(0, wheel_speed_[RIGHT_REAR] / (wheel_diameter_ / 2.0));
+// #endif
 
       last_update_time_+= common::Time(update_period_);
 
@@ -374,11 +475,20 @@ namespace gazebo {
     callback_queue_thread_.join();
   }
 
+    // normal distribution sampling
+  float GazeboRosSkidSteerDrive::sample(float var) {
+    float sum = 0;
+    for (int i = 0; i < 12; ++i)
+      sum += -1 + static_cast<float>(rand()) / (static_cast<float>(RAND_MAX/(2)));
+    return (var/6) * sum;
+  }
+
   void GazeboRosSkidSteerDrive::getWheelVelocities() {
     boost::mutex::scoped_lock scoped_lock(lock);
 
-    double vr = x_;
-    double va = rot_;
+    // Motion model velocity from Probabilistc Robotics Book, Thrun et al.
+    double vr = x_ + sample(alpha_[0]*fabs(x_) + alpha_[1]*fabs(rot_));
+    double va = rot_ + sample(alpha_[2]*fabs(x_) + alpha_[3]*fabs(rot_));
 
     wheel_speed_[RIGHT_FRONT] = vr + va * wheel_separation_ / 2.0;
     wheel_speed_[RIGHT_REAR] = vr + va * wheel_separation_ / 2.0;

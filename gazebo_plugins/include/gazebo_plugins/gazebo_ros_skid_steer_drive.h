@@ -92,7 +92,11 @@ namespace gazebo {
       double wheel_separation_;
       double wheel_diameter_;
       double torque;
+      double wheel_accel_;
       double wheel_speed_[4];
+      double wheel_speed_instr_[4];
+
+      double alpha_[4];
 
       physics::JointPtr joints[4];
 
@@ -120,7 +124,7 @@ namespace gazebo {
 
       // DiffDrive stuff
       void cmdVelCallback(const geometry_msgs::Twist::ConstPtr& cmd_msg);
-
+      float sample(float var);
       double x_;
       double rot_;
       bool alive_;
